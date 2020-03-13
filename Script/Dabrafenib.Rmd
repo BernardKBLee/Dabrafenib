@@ -1,0 +1,706 @@
+---
+title: "GDSC analysis"
+author: "Bernard Lee"
+date: "2020-02-10"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+#### Load library
+```{r}
+library(tidyverse)
+```
+
+### Load GDSC 1000 gene expression data
+```{r}
+GDSC1000 <- read.delim("~/OneDrive - Cancer Research Malaysia/Projects/2019/PLX4720/Output/GDSC1000_GE_original_collapsed_edited_WC.txt", header = TRUE, check.names = FALSE, row.names = 1)
+```
+
+#### Load sen and resistant file names
+```{r}
+sen_file <- list.files(path = "~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Sen", pattern = ".txt", full.names = TRUE)
+res_file <- list.files(path = "~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Res", pattern = ".txt", full.names = TRUE)
+```
+
+#### limma analysis
+```{r}
+sen <- read.delim("~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Dabrafenib_Sen.txt", header = TRUE)
+sen_idx <- read.delim(sen_file[10])
+sen_name <- sen[sen_idx$GeneName, ]
+sen_GE_idx <- colnames(GDSC1000) %in% sen_name$CELL_LINE_NAME
+sen_GE <- GDSC1000[, sen_GE_idx]
+
+res <- read.delim("~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Dabrafenib_Res.txt", header = TRUE)
+res_idx <- read.delim(res_file[10])
+res_name <- res[res_idx$GeneName, ]
+res_GE_idx <- colnames(GDSC1000) %in% res_name$CELL_LINE_NAME
+res_GE <- GDSC1000[, res_GE_idx]
+
+GE_combi <- cbind(sen_GE, res_GE)
+
+library(limma)
+
+sampl <- factor(c(rep("Sensitive", 11), rep("Resistant", 22)))
+design.mat <- model.matrix(~0 +sampl)
+colnames(design.mat) <- levels(sampl)
+design.mat
+
+contrast.mat <- makeContrasts(
+  Diff = Sensitive - Resistant,
+  levels = design.mat
+)
+contrast.mat
+
+fit <- lmFit(GE_combi, design.mat)
+fit2 <- contrasts.fit(fit, contrast.mat)
+fit3 <- eBayes(fit2)
+
+DEG <- topTable(fit3, coef = 'Diff', number = nrow(GE_combi), adjust.method = 'fdr', sort.by = 't')
+DEG$GeneName <- rownames(DEG)
+DEG <- DEG[, c(7, 1:6)]
+
+write.table(DEG, "~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Output/Dabrafenib_limma_10.txt", quote = FALSE, sep = '\t', row.names = FALSE)
+```
+
+#### DEG identification
+```{r}
+# Read in the files
+GSE <- read.delim("~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Output/Dabrafenib_limma_10.txt", header = TRUE, row.names = 1)
+head(GSE)
+GSE$lgtranspvalue <- -log10(GSE$P.Value)
+head(GSE)
+
+par(pch = 16)
+par(pty = "s")
+
+# Plotting the figures
+plot(GSE$logFC, GSE$lgtranspvalue, main='Dabrafenib - Sensitive (11) vs Resistant (22)', xlab=expression('lg'[2]*'FC'), ylab=expression('-lg'[10]*'pvalue'),cex.lab=1.2)
+with(subset(GSE, logFC < 0 & lgtranspvalue >= (2/-logFC)), points(logFC,lgtranspvalue, col = "red"))
+with(subset(GSE, logFC > 0 & lgtranspvalue >= (2/logFC)), points(logFC,lgtranspvalue, col = "blue"))
+
+# Add legend
+#legend("bottomright",legend=c(expression(paste('DOWN: lg'[2]*'FC<0 & -lg'[10]*'pvalue>=(2/-lg'[2]*'FC)')), expression(paste('UP: lg'[2]*'FC>0 & -lg'[10]*'pvalue>=(2/lg'[2]*'FC)'))),pch = 16, col=c("red", "blue"))
+
+# Draw lines -------------------------------------------------------------------
+xpos <- seq(0, 4, 0.01)
+xneg <- seq(-4, 0, 0.01)
+points(xpos, 2/xpos, type="l")
+points(xneg, -2/xneg, type="l")
+
+# Save down-regulated genes ----------------------------------------------------
+GSE_DOWN <- subset(GSE, logFC < 0 & -log10(P.Value)>=(2/-logFC) , select=c(logFC, P.Value))
+GSE_DOWN <- GSE_DOWN[order(GSE_DOWN$logFC), ]
+nrow(GSE_DOWN)
+GSE_DOWN$GeneName <- rownames(GSE_DOWN)
+GSE_DOWN <- GSE_DOWN[, c(3, 1:2)]
+head(GSE_DOWN)
+write.table(GSE_DOWN, "~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Output/_dabrafenib_limma_DOWN10.txt", quote = FALSE, sep = '\t', row.names = FALSE)
+
+# Save up-regulated genes ------------------------------------------------------
+GSE_UP <- subset(GSE, logFC > 0 & -log10(P.Value)>=(2/logFC) , select=c(logFC, P.Value))
+GSE_UP <- GSE_UP[order(GSE_UP$logFC, decreasing = TRUE), ]
+nrow(GSE_UP)
+GSE_UP$GeneName <- rownames(GSE_UP)
+GSE_UP <- GSE_UP[, c(3, 1:2)]
+head(GSE_UP)
+write.table(GSE_UP, "~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Output/_dabrafenib_limma_UP10.txt", quote = FALSE, sep = '\t', row.names = FALSE)
+```
+
+## Core genes
+```{r}
+dn_files <- list.files("~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Training_set/Output/limma_DN/", pattern = ".txt", full.names = TRUE)
+up_files <- list.files("~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Training_set/Output/limma_UP/", pattern = ".txt", full.names = TRUE)
+
+master <- read.delim(dn_files[1])
+master$Down1 <- "1"
+master <- master[, -c(2:3)]
+
+# Subsequent dn files
+dn_dn <- read.delim(dn_files[10])
+dn_dn$Down10 <- "1"
+dn_dn <- dn_dn[, -c(2:3)]
+
+
+# Merge dn genes
+#master_dn <- full_join(master, dn_dn)
+master_dn <- full_join(master_dn, dn_dn)
+
+# Remove NA dn genes
+master_dn[is.na(master_dn)] <- "0"
+write.table(master_dn, "~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Training_set/Output/__Core_DN_genes.txt", row.names = FALSE, sep = "\t", quote = FALSE)
+
+
+master <- read.delim(up_files[1])
+master$Up1 <- "1"
+master <- master[, -c(2:3)]
+
+# Subsequent dn files
+up_up <- read.delim(up_files[10])
+up_up$Up10 <- "1"
+up_up <- up_up[, -c(2:3)]
+
+# Merge dn genes
+#master_up <- full_join(master, up_up)
+master_up <- full_join(master_up, up_up)
+
+# Remove NA dn genes
+master_up[is.na(master_up)] <- "0"
+write.table(master_up, "~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Training_set/Output/__Core_UP_genes.txt", row.names = FALSE, sep = "\t", quote = FALSE)
+```
+
+
+#### validation
+#### Load sen and resistant file names
+```{r}
+sen_validation <- read.table("~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Validation_set/Dabrafenib_Sen_lines_validation.txt")
+res_validation <- read.table("~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Validation_set/Dabrafenib_Res_lines_validation.txt")
+```
+
+#### Validation set GE
+```{r}
+sen_validation_idx <- colnames(GDSC1000) %in% sen_validation$V1
+sum(sen_validation_idx)
+sen_validation_GE <- GDSC1000[, sen_validation_idx]
+
+res_validation_idx <- colnames(GDSC1000) %in% res_validation$V1
+sum(res_validation_idx)
+res_validation_GE <- GDSC1000[, res_validation_idx]
+
+GE_combi <- cbind(sen_validation_GE, res_validation_GE)
+write.table(GE_combi, "~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Validation_set/_Dabrafenib_validation_GE.txt", quote = FALSE, sep = "\t")
+```
+
+
+#### BRAF mutant
+```{r}
+BRAF_mut <- read.delim("~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Individual/BRAF_Mutants.txt", header = TRUE)
+BRAF_mut_idx <- colnames(GDSC1000) %in% BRAF_mut$Cell.Lines
+sum(BRAF_mut_idx)
+BRAF_Mut_GE <- GDSC1000[, BRAF_mut_idx]
+write.table(BRAF_Mut_GE, "~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Individual/BRAF_Mutants_GE.txt", quote = FALSE, sep = "\t")
+```
+
+#### Load ref profile
+```{r}
+dat <- read.delim("~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Individual/BRAF_Mutants_GE.txt", header = TRUE, check.names = FALSE)
+```
+
+
+#### Create dummby table 
+```{r}
+sscMap_Output <- data.frame(matrix(data = NA, nrow = ncol(dat) - 1, ncol = 3))
+colnames(sscMap_Output) <- c("Sample", "Sum_SRank", "CScore")
+sscMap_Output$Sample <- names(dat[2:length(dat)])
+```
+
+#### Load signatures
+```{r}
+query_up_sscMap <- read.delim("~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Training_set/Output/__Core_UP_genes_WC.txt", header = TRUE)
+#query_up_sscMap$logFC <- 1
+
+query_dn_sscMap <- read.delim("~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Training_set/Output/__Core_DN_genes_WC.txt", header = TRUE)
+#query_dn_sscMap$logFC <- -1
+
+query_Sig <- bind_rows(query_up_sscMap, query_dn_sscMap)
+query_Sig$GeneName <- as.character(query_Sig$GeneName)
+query_Sig <- query_Sig[order(abs(query_Sig$logFC), decreasing = TRUE), ]
+
+query_Sig$Query_signedRank_Ordered <- sign(query_Sig$logFC) * (length(query_Sig$GeneName): 1)
+query_Sig_Ordered <- query_Sig[, -c(2,3)]
+```
+
+#### sscMap order analysis starts
+```{r}
+for (i in 2:length(dat)) {
+  dat_subset <- dat[, c(1,i)]
+  dat_subset <- dat_subset[order(abs(dat_subset[2]), decreasing = TRUE), ]
+  dat_subset$Rank <- 1: length(dat_subset$GeneName)
+  dat_subset$refProfile_signedRanked <- sign(dat_subset[2]) * 
+    (length(dat_subset$GeneName) - dat_subset$Rank + 1)
+  dat_subset <- dat_subset[, -3]
+  dat_subset_Final <- dat_subset[which(dat_subset$GeneName %in% 
+                                         query_Sig$GeneName), ]
+  
+# Merge with signatures & Start Calculating ------------------------------------
+# Changed the query accordingly; either ordered or unordered (Line 59 & 60)
+  dat_merge <- left_join(dat_subset_Final, query_Sig, by = "GeneName")
+  dat_merge$Signed_Rank <- dat_merge$Query_signedRank_Ordered * 
+    dat_merge$refProfile_signedRanked
+  sscMap_Output[i-1, 2] <- sum(dat_merge$Signed_Rank)
+  
+  print(i-1)
+}
+```
+
+#### Calculate sscMap Connectivity Score
+```{r}
+sscMap_Output$CScore <- sscMap_Output$Sum_SRank / max(sscMap_Output$Sum_SRank)
+
+sscMap_Output <- sscMap_Output[order(sscMap_Output$CScore, decreasing = TRUE), ]
+sscMap_Output$Rank <- 1:length(sscMap_Output$Sample)
+head(sscMap_Output)
+```
+
+#### Write the output
+```{r}
+write.csv(sscMap_Output, "~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Individual/_Dabrafenib_sscMap_ordered_individual.csv", row.names = FALSE)
+```
+
+#### Coorelation
+```{r}
+dat <- read.table("~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Validation_set/__sscMap__SRank_Validation_compiled.txt", header = TRUE, check.names = FALSE)
+
+dat$Status <- factor(dat$Status, levels = c("Sen", "Res"))
+
+ggplot(data = dat, aes(x = log10IC50, y = Sum_SRank)) +
+  geom_point(aes(colour = Status), size = 2) +
+  geom_hline(yintercept = 3346887086, linetype = "dashed", color = "red", size = 0.5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  ggplot2::labs(y = "sscMap Score", x = expression('log'[10]*'IC'[50])) +
+  theme_bw() +
+  theme(aspect.ratio = 1)
+
+# Correlation and regression
+ dat %>%
+  summarize(N = n(), r = cor(CScore, log10IC50))
+
+mod <- lm(formula = Sum_SRank ~ log10IC50, data = dat)
+summary(mod)
+```
+
+#### Load training GE
+```{r}
+dat <- read.delim("~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Validation_set/_Dabrafenib_validation_GE.txt", header = TRUE, check.names = FALSE)
+dat
+```
+
+
+#### Create dummby table 
+```{r}
+sscMap_Output <- data.frame(matrix(data = NA, nrow = ncol(dat) - 1, ncol = 3))
+colnames(sscMap_Output) <- c("Sample", "Sum_SRank", "CScore")
+sscMap_Output$Sample <- names(dat[2:length(dat)])
+```
+
+#### Load signatures
+```{r}
+query_up_sscMap <- read.delim("~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Validation_set/__Core_UP_genes_WC.txt", header = TRUE)
+query_up_sscMap$logFC <- 1
+query_up_sscMap <- query_up_sscMap[, c(1:2)]
+#query_Sig <- query_up_sscMap
+
+query_dn_sscMap <- read.delim("~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Validation_set/__Core_DN_genes_WC.txt", header = TRUE)
+query_dn_sscMap$logFC <- -1
+query_dn_sscMap <- query_dn_sscMap[, c(1:2)]
+#query_Sig <- query_dn_sscMap
+
+query_Sig <- bind_rows(query_up_sscMap, query_dn_sscMap)
+query_Sig$GeneName <- as.character(query_Sig$GeneName)
+#query_Sig <- query_Sig[order(abs(query_Sig$logFC), decreasing = TRUE), ]
+
+query_Sig$Query_signedRank_Ordered <- sign(query_Sig$logFC) * (length(query_Sig$GeneName): 1)
+#query_Sig_Ordered <- query_Sig[, -c(2,3)]
+```
+
+#### sscMap order analysis starts
+```{r}
+for (i in 2:length(dat)) {
+  dat_subset <- dat[, c(1,i)]
+  dat_subset <- dat_subset[order(abs(dat_subset[2]), decreasing = TRUE), ]
+  dat_subset$Rank <- 1: length(dat_subset$GeneName)
+  dat_subset$refProfile_signedRanked <- sign(dat_subset[2]) * 
+    (length(dat_subset$GeneName) - dat_subset$Rank + 1)
+  dat_subset <- dat_subset[, -3]
+  dat_subset_Final <- dat_subset[which(dat_subset$GeneName %in% 
+                                         query_Sig$GeneName), ]
+  
+# Merge with signatures & Start Calculating ------------------------------------
+# Changed the query accordingly; either ordered or unordered (Line 59 & 60)
+  dat_merge <- left_join(dat_subset_Final, query_Sig, by = "GeneName")
+  dat_merge$Signed_Rank <- dat_merge$Query_signedRank_Ordered * 
+    dat_merge$refProfile_signedRanked
+  sscMap_Output[i-1, 2] <- sum(dat_merge$Signed_Rank)
+  
+  print(i-1)
+}
+```
+
+#### Calculate sscMap Connectivity Score
+```{r}
+sscMap_Output$CScore <- sscMap_Output$Sum_SRank / max(sscMap_Output$Sum_SRank)
+
+sscMap_Output <- sscMap_Output[order(sscMap_Output$CScore, decreasing = TRUE), ]
+sscMap_Output$Rank <- 1:length(sscMap_Output$Sample)
+head(sscMap_Output)
+```
+
+#### Write the output
+```{r}
+write.csv(sscMap_Output, "~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Validation_set/___sscMap_Dabrafenib_DN.csv", row.names = FALSE)
+```
+
+#### Combine
+```{r}
+GSE99898 <- read_delim("/Volumes/bernard_MacBook/Projects/2020/NEW/_GSE99898/Validation/_WC_GSE99898_PRE.txt", delim = "\t")
+BRAF_Mut_GE <- BRAF_Mut_GE[, c(2, 1, 3:24)]
+
+BRAF_lines_patient_merge <- left_join(BRAF_Mut_GE, GSE99898)
+dim(BRAF_lines_patient_merge)
+
+# Remove NA lines
+BRAF_lines_patient_merge <-  BRAF_lines_patient_merge[complete.cases(BRAF_lines_patient_merge), ]
+
+write_delim(BRAF_lines_patient_merge, path = "~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Individual/Combine_Lines_GSE99898/BRAF_lines_patient_merge.txt", delim = "\t")
+```
+
+#### All Lines
+```{r}
+All_Lines <- read_csv("/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Data/dabrafenib.csv")
+```
+
+#### Clean data
+```{r}
+blood_idx <- which(All_Lines$Tissue == "blood")
+All_Lines_CLEAN <- All_Lines[-blood_idx, ]
+```
+
+#### Split data
+```{r}
+percent_30 <- sample(x = 1:nrow(All_Lines_CLEAN), size = nrow(All_Lines_CLEAN)* 0.3, replace = FALSE)
+percent_30_lines <- All_Lines_CLEAN[percent_30, ]
+write_delim(percent_30_lines, "/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Validation/Validation30.txt", delim = "\t")
+
+percent_70_lines <- All_Lines_CLEAN[-percent_30, ]
+```
+
+#### Training data - 70 percent
+```{r}
+range(percent_70_lines$IC50)
+percent_70_lines <- percent_70_lines[order(percent_70_lines$AUC), ]
+
+# Quantile analysis, 5% and 95%
+Q = quantile(percent_70_lines$AUC, c(0.05,0.95))
+
+# Sen - 13
+sen <- subset(percent_70_lines, AUC < Q[1])
+range(sen$IC50)
+sen <- sen %>%
+  filter(IC50 < 1)
+
+# Res - 22
+res <- subset(percent_70_lines, AUC > Q[2])
+range(res$IC50)
+
+# Sen splitting 70%, 30%
+sen_30_idx <- sample(x = 1:nrow(sen), size = nrow(sen) * 0.3, replace = FALSE)
+sen_30_lines <- sen[sen_30_idx, ]
+
+res_30_idx <- sample(x = 1:nrow(res), size = nrow(res) * 0.3, replace = FALSE)
+res_30_lines <- res[res_30_idx, ]
+
+merge_30 <- bind_rows(sen_30_lines, res_30_lines)
+write_delim(merge_30, "/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Percent30/validation_10.txt", delim = "\t")
+
+# 70%
+sen_70_lines <- sen[-sen_30_idx, ] #10
+res_70_lines <- res[-res_30_idx, ] #16
+merge_70 <- bind_rows(sen_70_lines, res_70_lines)
+write_delim(merge_70, "/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Percent70/training_10.txt", delim = "\t")
+```
+
+### Load GDSC 1000 gene expression data
+```{r}
+GDSC1000 <- read.delim("/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC1000_GE_original_collapsed_edited_WC.txt", header = TRUE, check.names = FALSE, row.names = 1)
+```
+
+#### Load training file names
+```{r}
+training_file <- list.files(path = "/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Percent70", pattern = ".txt", full.names = TRUE)
+```
+
+#### limma analysis
+```{r}
+training <- read_delim(training_file[10], delim = "\t")
+
+Sen_Lines <- training %>%
+  filter(IC50 < 1) %>%
+  select('Cell line')
+names(Sen_Lines) <- "Cell_Line"
+
+Res_Lines <- training %>%
+  filter(IC50 > 1) %>%
+  select('Cell line')
+names(Res_Lines) <- "Cell_Line"
+
+sen_GE_idx <- colnames(GDSC1000) %in% Sen_Lines$Cell_Line
+sen_GE <- GDSC1000[, sen_GE_idx]
+
+res_GE_idx <- colnames(GDSC1000) %in% Res_Lines$Cell_Line
+res_GE <- GDSC1000[, res_GE_idx]
+
+GE_combi <- cbind(sen_GE, res_GE)
+
+library(limma)
+
+sampl <- factor(c(rep("Sensitive", 10), rep("Resistant", 16)))
+design.mat <- model.matrix(~0 +sampl)
+colnames(design.mat) <- levels(sampl)
+design.mat
+
+contrast.mat <- makeContrasts(
+  Diff = Sensitive - Resistant,
+  levels = design.mat
+)
+contrast.mat
+
+fit <- lmFit(GE_combi, design.mat)
+fit2 <- contrasts.fit(fit, contrast.mat)
+fit3 <- eBayes(fit2)
+
+DEG <- topTable(fit3, coef = 'Diff', number = nrow(GE_combi), adjust.method = 'fdr', sort.by = 't')
+DEG$GeneName <- rownames(DEG)
+DEG <- DEG[, c(7, 1:6)]
+
+write.table(DEG, "/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Percent70/_Dabrafenib_training_10.txt", quote = FALSE, sep = '\t', row.names = FALSE)
+```
+
+#### DEG identification
+```{r}
+# Read in the files
+GSE <- read.delim("/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Percent70/_Dabrafenib_training_10.txt", header = TRUE, row.names = 1)
+head(GSE)
+GSE$lgtranspvalue <- -log10(GSE$P.Value)
+head(GSE)
+
+par(pch = 16)
+par(pty = "s")
+
+# Plotting the figures
+plot(GSE$logFC, GSE$lgtranspvalue, main='Dabrafenib - Sensitive (10) vs Resistant (16)', xlab=expression('lg'[2]*'FC'), ylab=expression('-lg'[10]*'pvalue'),cex.lab=1.2)
+with(subset(GSE, logFC < 0 & lgtranspvalue >= (2/-logFC)), points(logFC,lgtranspvalue, col = "red"))
+with(subset(GSE, logFC > 0 & lgtranspvalue >= (2/logFC)), points(logFC,lgtranspvalue, col = "blue"))
+
+# Add legend
+#legend("bottomright",legend=c(expression(paste('DOWN: lg'[2]*'FC<0 & -lg'[10]*'pvalue>=(2/-lg'[2]*'FC)')), expression(paste('UP: lg'[2]*'FC>0 & -lg'[10]*'pvalue>=(2/lg'[2]*'FC)'))),pch = 16, col=c("red", "blue"))
+
+# Draw lines -------------------------------------------------------------------
+xpos <- seq(0, 6, 0.01)
+xneg <- seq(-4, 0, 0.01)
+points(xpos, 2/xpos, type="l")
+points(xneg, -2/xneg, type="l")
+
+# Save down-regulated genes ----------------------------------------------------
+GSE_DOWN <- subset(GSE, logFC < 0 & -log10(P.Value)>=(2/-logFC) , select=c(logFC, P.Value))
+GSE_DOWN <- GSE_DOWN[order(GSE_DOWN$logFC), ]
+nrow(GSE_DOWN)
+GSE_DOWN$GeneName <- rownames(GSE_DOWN)
+GSE_DOWN <- GSE_DOWN[, c(3, 1:2)]
+head(GSE_DOWN)
+write.table(GSE_DOWN, "/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Percent70/_dabrafenib_training_limma_DOWN10.txt", quote = FALSE, sep = '\t', row.names = FALSE)
+
+# Save up-regulated genes ------------------------------------------------------
+GSE_UP <- subset(GSE, logFC > 0 & -log10(P.Value)>=(2/logFC) , select=c(logFC, P.Value))
+GSE_UP <- GSE_UP[order(GSE_UP$logFC, decreasing = TRUE), ]
+nrow(GSE_UP)
+GSE_UP$GeneName <- rownames(GSE_UP)
+GSE_UP <- GSE_UP[, c(3, 1:2)]
+head(GSE_UP)
+write.table(GSE_UP, "//Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Percent70/_dabrafenib_training_limma_UP10.txt", quote = FALSE, sep = '\t', row.names = FALSE)
+```
+
+## Core genes
+```{r}
+dn_files <- list.files("/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Percent70/limma_DN", pattern = ".txt", full.names = TRUE)
+up_files <- list.files("/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Percent70/limma_UP", pattern = ".txt", full.names = TRUE)
+
+master <- read.delim(dn_files[1])
+master$Down1 <- "1"
+master <- master[, -c(2:3)]
+
+# Subsequent dn files
+dn_dn <- read.delim(dn_files[10])
+dn_dn$Down10 <- "1"
+dn_dn <- dn_dn[, -c(2:3)]
+
+
+# Merge dn genes
+#master_dn <- full_join(master, dn_dn)
+master_dn <- full_join(master_dn, dn_dn)
+rownames(master_dn) <- master_dn$GeneName
+master_dn <- master_dn[, -1]
+
+
+# Remove NA dn genes
+master_dn[is.na(master_dn)] <- "0"
+write.table(master_dn, "/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Percent70/__Core_DN_genes.txt", row.names = TRUE, sep = "\t", quote = FALSE)
+
+master <- read.delim(up_files[1])
+master$Up1 <- "1"
+master <- master[, -c(2:3)]
+
+# Subsequent dn files
+up_up <- read.delim(up_files[10])
+up_up$Up10 <- "1"
+up_up <- up_up[, -c(2:3)]
+
+# Merge dn genes
+#master_up <- full_join(master, up_up)
+master_up <- full_join(master_up, up_up)
+
+# Remove NA dn genes
+master_up[is.na(master_up)] <- "0"
+write.table(master_up, "/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Percent70/__Core_UP_genes.txt", row.names = FALSE, sep = "\t", quote = FALSE)
+```
+
+
+#### validation
+#### Load sen and resistant file names
+```{r}
+Validation_Lines <- read_delim("/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Validation/Validation30.txt", delim = "\t")
+```
+
+#### Validation set GE
+```{r}
+Validation_NAME <- Validation_Lines %>%
+  select("Cell line")
+names(Validation_NAME) <- "Cell_Line"
+
+Validation_GE_idx <- colnames(GDSC1000) %in% Validation_NAME$Cell_Line
+Validation_GE <- GDSC1000[, Validation_GE_idx]
+Validation_GE$GeneName <- rownames(Validation_GE)
+Validation_GE <- Validation_GE[, c(184, 1:183)]
+
+write_delim(Validation_GE, "/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Validation/_Dabrafenib_validation_GE.txt", delim = "\t")
+```
+
+#### Training
+```{r}
+#Validation_Name <- list.files("/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Percent30", pattern = ".txt", full.names = TRUE)
+
+Val <- read_delim(Validation_Name[10], delim = "\t")
+Val_NAME <- Val %>%
+  select('Cell line')
+Val_idx <- colnames(GDSC1000) %in% Val_NAME$`Cell line`
+Val_GE <- GDSC1000[, Val_idx]
+Val_GE$GeneName <- rownames(Val_GE)
+Val_GE <- Val_GE[, c(10, 1:9)]
+write.table(Val_GE, "/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Percent30/GE/Val_10_GE.txt", row.names = TRUE, quote = FALSE, sep = "\t")
+```
+
+
+
+
+
+
+
+#### sscMap analysis
+#### Load training GE
+```{r}
+dat <- read.delim("/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Individual/GSE99898/_WC_Master_GSE99898_GE_Edited.txt", header = TRUE, check.names = FALSE)
+dat
+```
+
+#### Create dummby table 
+```{r}
+sscMap_Output <- data.frame(matrix(data = NA, nrow = ncol(dat) - 1, ncol = 3))
+colnames(sscMap_Output) <- c("Sample", "Sum_SRank", "CScore")
+sscMap_Output$Sample <- names(dat[2:length(dat)])
+```
+
+#### Load signatures
+```{r}
+query_up_sscMap <- read.delim("/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Individual/GSE99898/___WC_Core_UP_genes_FINAL.txt", header = TRUE)
+query_up_sscMap$logFC <- 1
+query_up_sscMap <- query_up_sscMap[, c(1:2)]
+#query_Sig <- query_up_sscMap
+
+query_dn_sscMap <- read.delim("/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Individual/GSE99898/___WC_Core_DN_genes_FINAL.txt", header = TRUE)
+query_dn_sscMap$logFC <- -1
+query_dn_sscMap <- query_dn_sscMap[, c(1:2)]
+#query_Sig <- query_dn_sscMap
+
+query_Sig <- bind_rows(query_up_sscMap, query_dn_sscMap)
+query_Sig$GeneName <- as.character(query_Sig$GeneName)
+#query_Sig <- query_Sig[order(abs(query_Sig$logFC), decreasing = TRUE), ]
+
+query_Sig$Query_signedRank_Ordered <- sign(query_Sig$logFC) * (length(query_Sig$GeneName): 1)
+#query_Sig_Ordered <- query_Sig[, -c(2,3)]
+```
+
+#### sscMap order analysis starts
+```{r}
+for (i in 2:length(dat)) {
+  dat_subset <- dat[, c(1,i)]
+  dat_subset <- dat_subset[order(abs(dat_subset[2]), decreasing = TRUE), ]
+  dat_subset$Rank <- 1: length(dat_subset$GeneName)
+  dat_subset$refProfile_signedRanked <- sign(dat_subset[2]) * 
+    (length(dat_subset$GeneName) - dat_subset$Rank + 1)
+  dat_subset <- dat_subset[, -3]
+  dat_subset_Final <- dat_subset[which(dat_subset$GeneName %in% 
+                                         query_Sig$GeneName), ]
+  
+  # Merge with signatures & Start Calculating ------------------------------------
+  # Changed the query accordingly; either ordered or unordered (Line 59 & 60)
+  dat_merge <- left_join(dat_subset_Final, query_Sig, by = "GeneName")
+  dat_merge$Signed_Rank <- dat_merge$Query_signedRank_Ordered * 
+    dat_merge$refProfile_signedRanked
+  sscMap_Output[i-1, 2] <- sum(dat_merge$Signed_Rank)
+  
+  print(i-1)
+}
+```
+
+#### Calculate sscMap Connectivity Score
+```{r}
+sscMap_Output$CScore <- sscMap_Output$Sum_SRank / max(sscMap_Output$Sum_SRank)
+head(sscMap_Output)
+sscMap_Output$log10_Sum_SRank <- log10(sscMap_Output$Sum_SRank)
+sscMap_Output <- sscMap_Output[order(sscMap_Output$log10_Sum_SRank, decreasing = TRUE), ]
+sscMap_Output$Rank <- 1:length(sscMap_Output$Sample)
+head(sscMap_Output)
+```
+
+#### Write the output
+```{r}
+write.csv(sscMap_Output, "/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Individual/GSE99898/sscMap/_sscMap_GSE99898.csv", row.names = FALSE)
+```
+
+#### Coorelation
+```{r}
+dat <- read.table("~/OneDrive - Cancer Research Malaysia/Projects/2020/GDSC2/GDSC2/Dabrafenib/Validation_set/__ES_Validation_compiled_sscMap_Sum_SRank.txt", header = TRUE, check.names = FALSE)
+#dat$log10_IC50 <- log10(dat$IC50)
+
+dat$Status <- factor(dat$Status, levels = c("Sen", "Res"))
+
+ggplot(data = dat, aes(x = log10_IC50, y = log10_Sum_SRank)) +
+  geom_point(aes(colour = Status), size = 2) +
+  geom_hline(yintercept = 9.524641, linetype = "dashed", color = "red", size = 0.5) +
+  geom_smooth(method = "lm", se = FALSE) +
+  ggplot2::labs(y = expression('log'[10]*'sscMap Sum Srank'), x = expression('log'[10]*'IC'[50])) +
+  theme_bw() +
+  theme(aspect.ratio = 1)
+
+# Correlation and regression
+ dat %>%
+  summarize(N = n(), r = cor(log10_Sum_SRank, log10_IC50))
+
+mod <- lm(formula = log10_Sum_SRank ~ log10_IC50, data = dat)
+summary(mod)
+```
+
+#### GSE99898
+```{r}
+Genes <- TR_GE %>%
+  select(c(GeneName, HCC1419))
+
+GSE99898 <- read_delim("/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Individual/GSE99898/_WC_Master_GSE99898_GE.txt", delim = "\t")
+GSE99898 <- GSE99898[, -2]
+
+GSE99898_edited <- left_join(Genes, GSE99898)
+GSE99898_edited <- GSE99898_edited[, -2]
+
+write_delim(GSE99898_edited, "/Volumes/bernard_MacBook/Projects/2020/NEW/GDSC2/GDSC2/Dabrafenib/ALL/Individual/GSE99898/_WC_Master_GSE99898_GE_Edited.txt", delim = "\t")
+```
+
+
